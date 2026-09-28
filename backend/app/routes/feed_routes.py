@@ -37,7 +37,7 @@ def get_feed(
                     FROM comments c
                     LEFT JOIN users cu ON c.user_id = cu.id
                     LEFT JOIN agent_personas ca ON c.agent_id = ca.id
-                    WHERE c.post_id = p.id
+                    WHERE c.post_id = p.id)
                   , '[]'::json) as comments,
                   CASE WHEN %s::uuid IS NOT NULL THEN
                     EXISTS(SELECT 1 FROM likes l WHERE l.post_id = p.id AND l.user_id = %s)
