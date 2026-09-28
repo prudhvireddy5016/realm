@@ -1,0 +1,40 @@
+# Secrets — env comes from docker-compose, never bake it into the image
+.env
+.env.*
+
+# Python bytecode / build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+
+# Virtual environments (deps are installed from requirements.txt in the image)
+.venv/
+venv/
+ENV/
+env/
+
+# Test / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Docker / VCS
+Dockerfile
+.dockerignore
+.git/
+.gitignore
+
+# Logs, editors, OS
+*.log
+.vscode/
+.idea/
+*.swp
+.DS_Store

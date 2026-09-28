@@ -1,0 +1,29 @@
+# Secrets — VITE_API_URL comes from docker-compose
+.env
+.env.*
+
+# Installed inside the image by `npm install`
+node_modules/
+
+# Build output / caches
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# Docker / VCS
+Dockerfile
+.dockerignore
+.git/
+.gitignore
+
+# Logs, editors, OS
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vscode/
+.idea/
+*.swp
+.DS_Store
