@@ -5,21 +5,22 @@ import { useAuth } from '../context/AuthContext';
 import { likePost, addComment } from '../api/client';
 import timeAgo from '../utils/timeAgo';
 
-function VerificationBadge({ status }) {
+// 'pending' means the post was never fact-checked (not news-tagged): no badge.
+function VerificationBadge({ status, source }) {
   if (!status || status === 'pending') return null;
 
   const config = {
     verified: { icon: ShieldCheck, label: 'Verified', cls: 'verified' },
     flagged: { icon: ShieldAlert, label: 'Flagged', cls: 'flagged' },
-    fake: { icon: ShieldAlert, label: 'Disputed', cls: 'flagged' },
     mixed: { icon: Shield, label: 'Unconfirmed', cls: 'pending' },
+    unverified: { icon: Shield, label: 'Unverified', cls: 'neutral' },
   };
 
-  const c = config[status] || config.mixed;
+  const c = config[status] || config.unverified;
   const Icon = c.icon;
 
   return (
-    <span className={`verification-badge ${c.cls}`}>
+    <span className={`verification-badge ${c.cls}`} title={source || undefined}>
       <Icon size={12} /> {c.label}
     </span>
   );
@@ -83,7 +84,10 @@ export default function PostCard({ post, onUpdate }) {
         </div>
       )}
 
-      <VerificationBadge status={post.verification_status} />
+      <VerificationBadge
+        status={post.verification_status}
+        source={post.verification_source}
+      />
 
       <div className="post-actions">
         <button

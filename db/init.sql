@@ -49,7 +49,7 @@ CREATE TABLE posts (
     media_url TEXT,
     media_type VARCHAR(20),              -- image, video, link
     tags TEXT[] DEFAULT '{}',
-    verification_status VARCHAR(20) DEFAULT 'pending', -- pending, verified, flagged, fake
+    verification_status VARCHAR(20) DEFAULT 'pending', -- pending (not checked), verified, mixed, flagged, unverified
     verification_source TEXT,
     like_count INTEGER DEFAULT 0,
     comment_count INTEGER DEFAULT 0,
@@ -111,7 +111,7 @@ CREATE TABLE news_verifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
     claim_text TEXT,
-    verdict VARCHAR(20) NOT NULL,       -- true, false, mixed, unverified
+    verdict VARCHAR(20) NOT NULL,       -- verified, mixed, flagged, unverified
     confidence FLOAT,
     sources JSONB DEFAULT '[]',
     checked_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

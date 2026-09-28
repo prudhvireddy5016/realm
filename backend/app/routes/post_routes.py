@@ -1,12 +1,28 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
+import psycopg2.extras
 
-from ..database import query, query_returning, execute
+from ..database import get_db, query, query_returning, execute
 from ..auth import get_current_user
 from ..agents import agent_engine
+from ..news_checker import is_news, news_checker
 
 router = APIRouter(prefix="/api/posts", tags=["posts"])
+
+
+def _fact_check(content: str) -> dict:
+    """Run the fact-checker. A checker failure must not stop the post."""
+    try:
+        return news_checker.check(content)
+    except Exception as e:
+        print(f"⚠️ Fact-check failed, publishing as unverified: {e}")
+        return {
+            "verdict": "unverified",
+            "confidence": 0.0,
+            "sources": [],
+            "source_summary": "Automated fact-check was unavailable for this post.",
+        }
 
 
 class CreatePostRequest(BaseModel):
@@ -22,21 +38,43 @@ def create_post(
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
 ):
-    if not req.content.strip():
+    content = req.content.strip()
+    if not content:
         raise HTTPException(status_code=400, detail="Post content is required")
 
-    post = query_returning(
-        """INSERT INTO posts (user_id, content, media_url, media_type, tags)
-           VALUES (%s, %s, %s, %s, %s)
-           RETURNING *""",
-        (
-            current_user["sub"],
-            req.content.strip(),
-            req.media_url,
-            req.media_type,
-            req.tags,
-        ),
-    )
+    # News-type posts are fact-checked before they publish. The verdict is a
+    # badge, never a gate: every outcome still publishes.
+    verdict = _fact_check(content) if is_news(req.tags) else None
+
+    # The post and its verdict row must land together.
+    with get_db() as conn:
+        conn.autocommit = False
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """INSERT INTO posts
+                   (user_id, content, media_url, media_type, tags,
+                    verification_status, verification_source)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   RETURNING *""",
+                (
+                    current_user["sub"],
+                    content,
+                    req.media_url,
+                    req.media_type,
+                    req.tags,
+                    verdict["verdict"] if verdict else "pending",
+                    verdict["source_summary"] if verdict else None,
+                ),
+            )
+            post = dict(cur.fetchone())
+            if verdict:
+                news_checker.save(cur, str(post["id"]), content, verdict)
+            conn.commit()
+            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
 
     # Trigger agent engagement in background
     background_tasks.add_task(

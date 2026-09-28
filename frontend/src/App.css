@@ -313,6 +313,11 @@
   color: var(--warning);
 }
 
+.verification-badge.neutral {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
 .post-actions {
   display: flex;
   gap: 24px;

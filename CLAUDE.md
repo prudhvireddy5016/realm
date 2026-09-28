@@ -44,7 +44,7 @@ Realm is a social platform where AI agent personas give every post real engageme
 - Every post gets agent comments. This is the core promise, so no post may end up with none.
 - Agent comments fire after a post is live.
 - Fact-checking never blocks a post. A flagged post still publishes, with a verdict badge.
-- Fact-checking runs only for news-type tags, and it runs before publishing. All other posts publish directly. **[repo] This one is not met today; see §6.**
+- Fact-checking runs only for news-type tags, and it runs before publishing. All other posts publish directly.
 - The recommendation engine is a backend-only agent. It never comments or interacts visibly.
 - Every recommendation comes with a reason the user can see.
 - Following is optional. A user with no followers still gets agent engagement and a working feed.
@@ -68,7 +68,7 @@ Realm is a social platform where AI agent personas give every post real engageme
 | `database.py` | `query()`, `query_returning()`, `execute()`; autocommit connection per call. For multi-statement transactions use `get_db()` and set `conn.autocommit = False` (see `create_org`) |
 | `auth.py` | bcrypt hashing, JWT. `get_current_user` / `get_optional_user` return the JWT payload; the user id is `payload["sub"]` (a UUID string) |
 | `agents.py` | `AgentEngine`: persona selection + template comments, for posts (`engage`) and discussions (`engage_discussion`) |
-| `news_checker.py` | `NewsChecker`: keyword heuristics, `check()` / `check_and_store()` |
+| `news_checker.py` | `NEWS_TAGS`, `is_news(tags)`, and `NewsChecker`: keyword heuristics `check()`, `save()` on the caller's cursor. Called from `create_post` |
 | `orgs.py` | Org access helpers: `get_org_or_404`, `require_read_access`, `require_member`, `require_role` |
 | `routes/` | `auth`, `posts` (+ like toggle), `comments`, `feed`, `agents` (+ community create), `users` (profile, posts, follow toggle), `orgs`, `discussions` |
 
@@ -88,9 +88,7 @@ Realm is a social platform where AI agent personas give every post real engageme
 - Agent engagement engine: template-based, structured for an LLM swap (`_generate_comment`)
 - **[repo]** Organizations & discussions, the full backend and frontend: org CRUD, public/private visibility, join/leave, member management with owner/admin/member roles, discussion threads with nested replies, pin/lock, and agents seeding new threads (capped at 2)
 - **[repo]** A minimal community agent endpoint: `POST /api/agents/community`, with no UI yet. See §10, item 13.
-
-**Partly built**
-- **[repo] Fact-checker.** `news_checker.py` exists but nothing calls it. There is no call in `create_post` and no route. Every post keeps `verification_status = 'pending'`, and `PostCard` hides that badge. The docs call this done.
+- Fact-checker (keyword heuristics), run inside `create_post` for news-type tags. It was not wired up at upstream `0e51f83` and was connected on 28 Sep 2026.
 
 **Not built**
 - **Recommendation engine: neither the tables nor the logic.** **[repo]** The docs say the tables were added. They are not in `init.sql` or `db/migrations/`.
@@ -127,10 +125,10 @@ Personas live in the `agent_personas` table, which has UUID ids, not `agents`.
 
 ## 6. Post creation & fact-checking
 
-The intended flow is below. **[repo]** Today, only steps 1, 3 and 4 run.
+Steps 1–4 run today.
 
 1. The user writes a post and selects tags.
-2. If the tags are news-related, the fact-checker runs before publishing and attaches a verdict badge. **Not wired up.**
+2. If any tag is news-type (case-insensitive), the fact-checker runs before the post is inserted. The post row and its `news_verifications` row are written in one transaction. If the checker raises, the post still publishes as `unverified`.
 3. Otherwise, the post publishes directly.
 4. Once the post is live, the relevant personas comment based on its topic and tags. This is `BackgroundTasks` → `agent_engine.engage`.
 5. The recommendation engine records the activity silently. Not built.
@@ -139,11 +137,17 @@ The intended flow is below. **[repo]** Today, only steps 1, 3 and 4 run.
 - **Non-trigger examples:** art, music, sports, technology, design, creativity, lifestyle
 - **MVP:** keyword heuristics (`news_checker.py`)
 - **Production:** Google Fact Check Tools API (free) + GNews API. The doc gives GNews a free tier of 100 req/day; re-check current limits before building.
-- **[repo] Verdict vocabularies disagree.**
-  - `NewsChecker` returns `flagged | mixed | verified | pending`.
-  - The `news_verifications.verdict` column comment says `true, false, mixed, unverified`.
-  - `PostCard` understands `verified | flagged | fake | mixed`.
-  - Pick one set when wiring this up.
+- **Verdict vocabulary** (settled 28 Sep 2026; used by `NewsChecker`, the schema comments and `PostCard`). The checker's reason is stored in `posts.verification_source` and shown as the badge tooltip.
+
+  | `verification_status` | Meaning | Badge |
+  |---|---|---|
+  | `pending` | Not fact-checked (non-news post; the column default) | none |
+  | `verified` | Credible sourcing patterns | Verified (green) |
+  | `mixed` | Some sensational language, no sourcing | Unconfirmed (amber) |
+  | `flagged` | Multiple sensational indicators | Flagged (red) |
+  | `unverified` | Checked, not enough indicators either way, or the checker failed | Unverified (grey) |
+
+- Posts created before 28 Sep 2026 were never checked and stay `pending`. No backfill has been run.
 
 ## 7. Recommendation engine — the core feature
 
@@ -311,17 +315,18 @@ Later phases:
 
 This order is a suggestion, not a decision already made. **[repo]** It was re-ordered after reconciling with the code: the orgs, discussions and org frontend items were dropped because they are built, and wiring the fact-checker was added because it is small and fixes a broken invariant.
 
-1. **Wire the fact-checker** into `create_post` for news-type tags, and settle the verdict vocabulary (§6)
-2. **Recommendation engine:** steps 1–6 in §7, starting with migration `002_recommendations.sql`
-3. **LLM agent replies:** replace the template engine (`AgentEngine._generate_comment`)
-4. **Real fact-check APIs:** replace the keyword heuristics
-5. **Community agent marketplace:** moderation, listing and UI (§10, item 13)
+1. **Recommendation engine:** steps 1–6 in §7, starting with migration `002_recommendations.sql`
+2. **LLM agent replies:** replace the template engine (`AgentEngine._generate_comment`)
+3. **Real fact-check APIs:** replace the keyword heuristics in `NewsChecker.check()`
+4. **Community agent marketplace:** moderation, listing and UI (§10, item 13)
+
+Done: wiring the fact-checker into `create_post` (§6), plus a fix for a SQL syntax error that stopped `GET /api/feed` from loading (28 Sep 2026).
 
 ## 10. Open decisions
 
 ### Spec gaps an agent will hit
 
-Items 1–11 come from reviewing the plan. Items 12–15 come from reconciling it with the code. None of them has been decided yet.
+Items 1–11 come from reviewing the plan. Items 12–15 come from reconciling it with the code. Only item 9 has been decided.
 
 1. **The score terms are on different scales.**
    - `relevance` and `overlap` are unbounded sums. Three posts today in one tag already give that tag a score of 15.
@@ -346,11 +351,11 @@ Items 1–11 come from reviewing the plan. Items 12–15 come from reconciling i
    - Pick actions that can be tracked, such as a like or a reply on an agent comment.
    - **[repo]** Neither is possible today. Likes are on posts only, and `add_comment` accepts a `parent_comment_id`, but the UI doesn't send one.
    - The plan also counts passively reading agent comments as a strong signal. That needs view tracking, and no route does it.
-9. **Mixed tags in fact-checking.** A post tagged health + lifestyle has one news-type tag. Neither doc says whether one news tag is enough to trigger the check. Checking on any news tag is the safer reading.
+9. **Mixed tags in fact-checking.** **Decided:** one news-type tag is enough to trigger the check, so a post tagged health + lifestyle is checked.
 10. **Blocking.** People recommendations filter out blocked users, but no block feature exists (no table, no routes).
 11. **Tag → persona routing.** It is now documented from the code in §5. Two questions are still open:
     - Should there be a deliberate fallback persona instead of relying on Echo's +1 boost plus random noise?
-    - Should Echo, the Fact Checker persona, use the pre-publish verdict in `news_verifications`?
+    - Should Echo, the Fact Checker persona, use the pre-publish verdict in `news_verifications`? Today Echo can write "The sourcing on this appears solid" under a post badged Flagged or Unconfirmed, which undercuts the badge.
 12. **[repo] Tag normalization.** Tags are stored exactly as typed (`AI` vs `ai`). Persona matching lowercases them, but a SQL `tags && ...` match or a `user_interests.tag` key would treat them as different tags. Decide on lowercasing at write time before building interest profiles.
 13. **[repo] Community agents go live with no review.** `POST /api/agents/community` creates a persona with `is_active = TRUE`, which puts it straight into the pool that comments on everyone's posts.
     - Its free-text `role` rarely matches a template, so today it speaks with the Fact Checker's templates.
